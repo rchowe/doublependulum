@@ -7,16 +7,29 @@
 		<style>
 			#simulation {
 				display: block;
-				width: 800px;
+				width: 1000px;
 				height: 600px;
 				margin: auto;
 				/* border: 1px black solid; */
+			}
+
+			#log-area {
+				width: 1000px;
+				margin: auto;
+				font-family: Menlo, Monaco, monospace;
+			}
+
+			.log-number {
+				color: #aaa;
 			}
 		</style>
 	</head>
 
 	<body>
-		<canvas id = 'simulation' width = '800' height = '600'>
+		<canvas id = 'simulation' width = '1000' height = '600'>
 		</canvas>
+
+		<div id = 'log-area'>
+		</div>
 	</body>
 </html>
