@@ -1,4 +1,6 @@
 
+PATH_LENGTH = 500
+
 # Location of the top of the pendulum
 g  = 9.8
 time = 0.05
@@ -7,36 +9,70 @@ canvas  = document.getElementById('simulation')
 context = canvas.getContext('2d')
 logArea = document.getElementById('log-area')
 
-target = [[300, 400], [400, 200], [500, 400], [460, 300], [360, 300]]
+targetPoints = [[400, 400], [500, 200], [600, 400], [560, 300], [460, 300]]
 drawTarget = =>
     context.save()
-    context.strokeStyle = 'rgba(255, 0, 0, 0.2)'
-    context.moveTo(target[0]...)
-    for i in [1..target.length-1]
-        context.lineTo(target[i]...)
+    context.strokeStyle = 'rgba(255, 0, 0, 0.1)'
+    context.moveTo(targetPoints[0]...)
+    for i in [1..targetPoints.length-1]
+        context.lineTo(targetPoints[i]...)
     context.stroke()
     context.restore()
 
-log = (message) ->
+pairwise = (array) ->
+    ([array[i], array[i+1]] for i in [0..array.length-2])
+
+euclideanDistance = ([x1, y1], [x2, y2]) ->
+    dx = x2 - x1
+    dy = y2 - y1
+    Math.sqrt(dx * dx + dy * dy)
+
+window.log = (message...) ->
     log.number = (log.number or 0) + 1
-    logArea.innerHTML = '<span class = "log-number">[' + log.number + ']</span> ' + message + '<br/>' + logArea.innerHTML
+    logArea.innerHTML = '<span class = "log-number">[' + ('     ' + log.number).slice(-5) + ']</span> ' + message.join('<br/>        ') + '<br/><br/>' + logArea.innerHTML
+
+eLength = pairwise(targetPoints).
+    map(([pt1, pt2]) -> euclideanDistance(pt1, pt2)).
+    reduce((a, b) -> a + b)
+
+target = []
+
+ds = eLength / PATH_LENGTH
+for [r1, r2] in pairwise(targetPoints)
+    [[x1, y1], [x2, y2]] = [r1, r2]
+    dx = x2 - x1
+    dy = y2 - y1
+    r = euclideanDistance r1, r2
+    for i in [0..Math.floor(r / ds)]
+        target.push([x1 + i * ds * dx / r, y1 + i * ds * dy / r])
+
+maxWidth = (points) ->
+    xs = points.map(([x, _]) -> x)
+    xs.reduce((a, b) -> Math.max(a, b)) - xs.reduce((a, b) -> Math.min(a, b))
+
+maxHeight = (points) ->
+    ys = points.map(([_, y]) -> y)
+    ys.reduce((a, b) -> Math.max(a, b)) - ys.reduce((a, b) -> Math.min(a, b))
+
+targetWidth  = maxWidth targetPoints
+targetHeight = maxHeight targetPoints
 
 drawLine = (x1, y1, x2, y2) =>
-    context.strokeStyle = 'rgba(0, 0, 0, 0.2)'
+    context.strokeStyle = 'rgba(0, 0, 0, 0.1)'
     context.beginPath()
     context.moveTo(x1, y1)
     context.lineTo(x2, y2)
     context.stroke()
 
-drawCircle = (x, y, m) =>
+drawCircle = (x, y, m, fillStyle = 'rgba(0, 0, 255, 0.1)', strokeStyle = 'rgba(0, 0, 0, 0.1)') =>
     context.save()
     context.beginPath()
     context.arc(x, y, m, 0, 2 * Math.PI, false)
-    context.fillStyle = 'rgba(0, 0, 255, 0.2)'
-    context.strokeStyle = 'rgba(0, 0, 0, 0.2)'
+    context.fillStyle = fillStyle
+    context.strokeStyle = strokeStyle
     context.lineWidth = 1
-    context.fill()
-    context.stroke()
+    context.fill() if fillStyle?
+    context.stroke() if strokeStyle?
     context.restore()
 
 drawPath = (path) =>
@@ -63,6 +99,7 @@ simulate = (vector, steps, animationFunction) =>
     for i in [0..steps-1]
         X[i+1] = step X[i]...
         animationFunction X[i+1], vector if animationFunction?
+    X
 
 path      = []
 animation = []
@@ -81,7 +118,7 @@ animateAppend = (v, params) =>
                 clearInterval animationInterval
                 animationInterval = null
                 runSimulation()
-        , 10
+        , 5
 
 animate = (v, params) =>
     context.clearRect(0, 0, canvas.width, canvas.height)
@@ -99,45 +136,65 @@ animate = (v, params) =>
     drawLine(x1, y1, x2, y2)
     drawCircle(x1, y1, m1)
     drawCircle(x2, y2, m2)
+    drawCircle(X0, Y0, 2, 'rgba(0, 0, 0, 0.1)', null)
     drawPath(path)
 
+ffwd = false
 
 runSimulation = =>
-    log('Displaying best simulation.')
-    simulate [10, 10, 140, 140, Math.random() * 2 * Math.PI, Math.random() * 2 * Math.PI, Math.random() * 600 + 200, Math.random() * 400 + 100], 1000, animateAppend
+    #simulate [10, 10, 140, 140, Math.random() * 2 * Math.PI, Math.random() * 2 * Math.PI, Math.random() * 600 + 200, Math.random() * 400 + 100], 1000, animateAppend
+    simulate elite[0].slice(0), PATH_LENGTH, animateAppend
+    iterateGA()
+    if ffwd
+        log('The last three settings were the same. <span style = "color: blue; font-weight: bold;">Fast-forwarding...</span>')
+        while ffwd
+            iterateGA()
 
 # --------------------- #
 # The Genetic Algorithm #
 # --------------------- #
 
-targetSeq = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
-
-N = 20
+N = 10
 MUTATION_CHANCE = 0.7
 CROSSOVER_CHANCE = 1 - MUTATION_CHANCE
 SAMPLE = 100
 
 population = []
-length = targetSeq.length
-alphabet = targetSeq
+length = 8
+
+minimum = [5, 5, 10, 10, 0, 0, 200, 100]
+maximum = [50, 50, 200, 200, 2 * Math.PI, 2 * Math.PI, 800, 500]
+
+Array::shuffle ?= ->
+  if @length > 1 then for i in [@length-1..1]
+    j = Math.floor Math.random() * (i + 1)
+    [@[i], @[j]] = [@[j], @[i]]
+  this
+
+enforce_bounds = (individual) =>
+    """ Limits the individual to  values no lower than the min and values no higher than the max. """
+    (Math.min(Math.max(individual[i], minimum[i]), maximum[i]) for i in [0..individual.length-1])
 
 choice = (array) =>
-    """ Chooses a random element from an array. """
     array[Math.floor(Math.random() * array.length)]
+
+window.random_value = (i) =>
+    """ Chooses a random element from a range. """
+    Math.random() * (maximum[i] - minimum[i]) + minimum[i]
 
 window.generate_individual = =>
     """ Generates a random individual. """
-    (choice(alphabet) for _ in [1..length])
+    (random_value(i) for i in [0..length-1])
 
 window.mutate = (individual) =>
     """ Point-mutates an individual. """
     i = choice([1..length-1])
     if i == 0
-        return [choice(alphabet)].concat(individual[1..-1])
+        return enforce_bounds([random_value(0)].concat(individual[1..-1]))
     else if i == length-1
-        return individual[1..-1].concat([choice(alphabet)])
+        return enforce_bounds(individual[1..-1].concat([random_value(i)]))
     else
-        return individual[0..i-1].concat([choice(alphabet)]).concat(individual[i+1..-1])
+        return enforce_bounds(individual[0..i-1].concat([random_value(i)]).concat(individual[i+1..-1]))
 
 window.crossover = (individualA, individualB) =>
     """ Generates a new individual by double-crossover. """
@@ -156,34 +213,87 @@ zip = (a, b) =>
 
 window.fitness = (individual) =>
     """ Evaluates an individual's fitness. """
-    zip(individual, targetSeq).map(([a, b]) -> a == b).reduce (a, b) -> a + b
+    [m1, m2, l1, l2, th1_0, th2_0, X0, Y0] = individual
+    v = simulate individual, PATH_LENGTH, null
+    x2 = v.map(([th1, th2]) -> X0 + l1 * Math.sin(th1) + l2 * Math.sin(th2))
+    y2 = v.map(([th1, th2]) -> Y0 + l1 * Math.cos(th1) + l2 * Math.cos(th2))
+    pts = zip x2, y2
+    dwidth  = Math.abs((targetWidth - maxWidth(pts)) / targetWidth)
+    dheight = Math.abs((targetHeight - maxHeight(pts)) / targetHeight)
+    square = (x) -> x * x
+    -1 * zip(pts, target).
+        map(([a, b]) -> euclideanDistance(a, b)).
+        map(square).
+        reduce((a, b) -> a + b) *
+        dwidth * dheight / PATH_LENGTH
 
-elite = [generate_individual(), -1]
+roundAll = (x) ->
+    x.map Math.round
+
+round3 = (x) ->
+    Math.round(x * 1000) / 1000
+
+roundAll3 = (x) ->
+    x.map round3
+
+SMAP_INTERVAL = 100
+smap_task = null
+smap_queue = []
+
+# Scheduled map; only fires an event every so often.
+Array::smap = (fn) ->
+    smap_queue.push([this, fn, 0, []])
+    if not smap_task?
+        smap_task = set_timeout ->
+            if smap_queue.length == 0
+                smap_task = null
+                return
+            [array, task, i] = smap_queue.pop()
+            task(array[i])
+        , SMAP_INTERVAL
+
+oldElites = []
+elite = [generate_individual(), -10000000]
 
 population = (generate_individual() for _ in [1..N])
-log('Initial Population: <ul>' + population.map((x) -> "<li>#{x}</li>").join('') + '</ul>')
+log(
+    '<b>*** Welcome to the Double Pendulum GA ***</b>',
+    '',
+    "N = #{N}",
+    "MUTATION_CHANCE  = #{MUTATION_CHANCE}",
+    "CROSSOVER_CHANCE = #{CROSSOVER_CHANCE}",
+    "PATH_LENGTH      = #{PATH_LENGTH}",
+    'population       =',
+    population.map((x) -> "  [#{roundAll3(x).join(', ')}]")...)
+#log('Initial Population: <ul>' + population.map((x) -> "<li>#{roundAll x}</li>").join('') + '</ul>')
 generation = 0
 iterateGA = =>
     tng = (mutate choice population for _ in [1..Math.floor(1.1 * N * MUTATION_CHANCE)]).concat(
         (crossover(choice(population), choice(population)) for _ in [1..Math.floor(1.1 * N * CROSSOVER_CHANCE)]))
 
-    fits = ([ind, fitness ind] for ind in tng).concat([elite]).sort((a, b) -> a[1] - b[1]).reverse()
+    fits = ([ind, fitness ind] for ind in tng).concat([elite]).shuffle().sort((a, b) -> a[1] - b[1]).reverse()
 
     population = fits[0..N-1].map((x) -> x[0])
 
     if fits[0][1] > elite[1]
         elite = fits[0]
 
+    if oldElites.length >= 3
+        ffwd = (elite == oldElites.pop(0))
+    oldElites.push(elite)
+
     generation += 1
-    if generation % 100 == 0
-        log('Generation ' + generation + '<br/> - Best individual: <span style = "color: red">"' + elite[0] +
-            '"</span> (fitness ' + elite[1] + ')<br/>' +
-            ' - Population: <ul>' + population.map((x) -> "<li>" + x + "</li>").join('') + "</ul>")
-    if elite[0] != targetSeq
-        setTimeout iterateGA, 10
-    else
-        log("Found target after #{generation} generations!")
-#iterateGA()
+    if not ffwd
+        if generation % 100 == 1
+            log("<i>Generation #{generation}</i>",
+                '- Best individual: <span style = "color: red">' + roundAll3(elite[0]).join(', ') + '</span> (fitness ' + round3(elite[1]) + ')',
+                '- Population: ',
+                fits[0..N-1].map(([ind, fit]) -> "    [#{roundAll3(ind).join(', ')}] (#{round3 fit})")...)
+        else
+            log("<i>Generation #{generation}</i>",
+                "- Best Individual: <span style = 'color: red;'>#{roundAll3(elite[0]).join(', ')}</span> (fitness #{round3 elite[1]})")
+#    setTimeout iterateGA, 10000
+iterateGA()
 # ---
 
 runSimulation()
